@@ -1,0 +1,98 @@
+package com.example.sj
+
+import android.content.Context
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+
+object DreamManager {
+    private const val PREFS_NAME = "dreams_prefs"
+    private const val DREAMS_KEY = "dreams_data"
+    private val gson = Gson()
+
+    private var dreams: MutableMap<Long, Dream> = mutableMapOf()
+    private var context: Context? = null
+
+    fun initialize(context: Context) {
+        this.context = context
+        loadDreams()
+    }
+
+    fun addDream(id: Long, title: String) {
+        dreams[id] = Dream(id, title)
+        saveDreams()
+    }
+
+    fun getDreamTitle(id: Long): String {
+        return dreams[id]?.title ?: "Неизвестная мечта"
+    }
+
+    fun getAllDreams(): Map<Long, Dream> {
+        return dreams.toMap()
+    }
+
+    fun getDreamById(id: Long): Dream? {
+        return dreams[id]
+    }
+
+    //  Получение шагов мечты
+    fun getDreamSteps(id: Long): List<DreamStep> {
+        return dreams[id]?.steps ?: emptyList()
+    }
+
+    //  Обновление шагов
+    fun updateDreamSteps(id: Long, steps: List<DreamStep>) {
+        val dream = dreams[id]
+        dream?.let {
+            it.steps.clear()
+            it.steps.addAll(steps)
+            it.allStepsCompleted = steps.all { step -> step.completed }
+            saveDreams()
+        }
+    }
+
+   // Обновление статуса конкретного шага
+    fun updateStepCompletion(dreamId: Long, stepIndex: Int, completed: Boolean) {
+        val dream = dreams[dreamId]
+        dream?.let {
+            if (stepIndex < it.steps.size) {
+                it.steps[stepIndex].completed = completed
+                it.allStepsCompleted = it.steps.all { step -> step.completed }
+                saveDreams()
+            }
+        }
+    }
+
+    fun updateDreamPosition(id: Long, x: Float, y: Float) {
+        val dream = dreams[id]
+        dream?.let {
+            it.positionX = x
+            it.positionY = y
+            saveDreams()
+        }
+    }
+
+    fun deleteDream(id: Long) {
+        dreams.remove(id)
+        saveDreams()
+    }
+
+    private fun loadDreams() {
+        val context = context ?: return
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val dreamsJson = prefs.getString(DREAMS_KEY, null)
+
+        dreams.clear()
+        if (dreamsJson != null) {
+            val type = object : TypeToken<MutableMap<Long, Dream>>() {}.type
+            val loadedDreams = gson.fromJson<MutableMap<Long, Dream>>(dreamsJson, type)
+            loadedDreams?.let { dreams.putAll(it) }
+        }
+    }
+
+    private fun saveDreams() {
+        val context = context ?: return
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val dreamsJson = gson.toJson(dreams)
+        prefs.edit().putString(DREAMS_KEY, dreamsJson).apply()
+    }
+}
