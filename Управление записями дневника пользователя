@@ -1,0 +1,64 @@
+package com.example.sj
+
+import android.content.Context
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+
+object JournalManager {
+    private const val PREFS_NAME = "journal_prefs"
+    private const val KEY_ENTRIES = "journal_entries"
+    private val gson = Gson()
+    private var entries = mutableListOf<JournalEntry>()
+    private var context: Context? = null
+
+    fun initialize(context: Context) {
+        this.context = context
+        loadEntries()
+    }
+
+    fun addEntry(entry: JournalEntry) {
+        entries.add(0, entry)
+        saveEntries()
+    }
+
+    fun deleteEntry(entryId: Long) {
+        entries.removeAll { it.id == entryId }
+        saveEntries()
+    }
+
+    fun updateEntry(updatedEntry: JournalEntry) {
+        val index = entries.indexOfFirst { it.id == updatedEntry.id }
+        if (index != -1) {
+            entries[index] = updatedEntry
+            saveEntries()
+        }
+    }
+
+    fun getEntryById(entryId: Long): JournalEntry? {
+        return entries.find { it.id == entryId }
+    }
+
+    fun getEntries(): List<JournalEntry> {
+        return entries.toList()
+    }
+
+    private fun saveEntries() {
+        val context = context ?: return
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val json = gson.toJson(entries)
+        prefs.edit().putString(KEY_ENTRIES, json).apply()
+    }
+
+    private fun loadEntries() {
+        val context = context ?: return
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val json = prefs.getString(KEY_ENTRIES, null)
+
+        entries = if (json != null) {
+            gson.fromJson(json, object : TypeToken<MutableList<JournalEntry>>() {}.type)
+                ?: mutableListOf()
+        } else {
+            mutableListOf()
+        }
+    }
+}
