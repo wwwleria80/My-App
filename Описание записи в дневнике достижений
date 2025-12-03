@@ -1,0 +1,22 @@
+package com.example.sj
+
+// Эта класс будет хранить информацию об одной записи в дневнике
+data class JournalEntry(
+    // Уникальный номер записи (создается автоматически)
+    val id: Long = System.currentTimeMillis(),
+
+    // Дата создания записи (текущее время)
+    val date: Long = System.currentTimeMillis(),
+
+    // Заголовок записи (например: "Закончил курс")
+    val title: String,
+
+    // Подробное описание
+    val description: String,
+
+    // Тип достижения (будем выбирать из списка)
+    val achievementType: String = "Достижение",
+
+    // ID мечты, если достижение связано с мечтой (не обязательно)
+    val relatedDreamId: Long? = null
+)
