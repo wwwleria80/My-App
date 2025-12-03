@@ -1,0 +1,166 @@
+package com.example.sj
+
+import android.content.Intent
+import android.os.Bundle
+import android.widget.EditText
+import android.widget.ImageView
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.floatingactionbutton.FloatingActionButton
+import android.graphics.Color
+
+class StepsActivity : AppCompatActivity() {
+
+    private lateinit var stepsAdapter: StepsAdapter
+    private val stepsList = mutableListOf<DreamStep>()
+    private var currentDreamId: Long = 0
+    private var dreamTitle: String = ""
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_steps)
+
+        // Получаем данные из предыдущего экрана
+        currentDreamId = intent.getLongExtra("dream_id", 0L)
+        dreamTitle = intent.getStringExtra("dream_title") ?: "Моя мечта"
+
+        // Загружаем сохраненные шаги
+        loadSavedSteps()
+
+        setupUI()
+        setupRecyclerView()
+    }
+
+    private fun loadSavedSteps() {
+        stepsList.clear()
+        val savedSteps = DreamManager.getDreamSteps(currentDreamId)
+
+        if (savedSteps.isNotEmpty()) {
+            stepsList.addAll(savedSteps)
+        }
+    }
+
+    private fun setupUI() {
+        val tvDreamTitle = findViewById<TextView>(R.id.tv_dream_title)
+        tvDreamTitle.text = "Шаги: $dreamTitle"
+
+        findViewById<ImageView>(R.id.iv_back).setOnClickListener {
+            saveStepsBeforeExit()
+            finish()
+        }
+
+        findViewById<FloatingActionButton>(R.id.fab_add_step).setOnClickListener {
+            showAddStepDialog()
+        }
+
+        // Если шагов нет, показываем подсказку
+        if (stepsList.isEmpty()) {
+            Toast.makeText(this, "Нажмите + чтобы добавить первый шаг", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun setupRecyclerView() {
+        stepsAdapter = StepsAdapter(stepsList)
+
+        // Обработчик изменения статуса шага
+        stepsAdapter.onStepChecked = { step, isChecked, position ->
+            step.completed = isChecked
+            DreamManager.updateStepCompletion(currentDreamId, position, isChecked)
+            checkAllStepsCompleted()
+        }
+
+        // Обработчик удаления шага
+        stepsAdapter.onStepDelete = { position ->
+            if (stepsList.size > 1) {
+                stepsList.removeAt(position)
+                DreamManager.updateDreamSteps(currentDreamId, stepsList)
+                stepsAdapter.updateSteps(stepsList)
+                checkAllStepsCompleted()
+            } else {
+                Toast.makeText(this, "Должен остаться хотя бы один шаг", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // Обработчик изменения текста шага
+        stepsAdapter.onStepTextChanged = { position, newText ->
+            stepsList[position].text = newText
+            DreamManager.updateDreamSteps(currentDreamId, stepsList)
+        }
+
+        val recyclerView = findViewById<RecyclerView>(R.id.rv_steps)
+        recyclerView.layoutManager = LinearLayoutManager(this)
+        recyclerView.adapter = stepsAdapter
+    }
+
+    private fun checkAllStepsCompleted(): Boolean {
+        if (stepsList.isEmpty()) return false
+
+        val allCompleted = stepsList.all { it.completed }
+
+        // Обновляем статус в DreamManager
+        DreamManager.updateDreamSteps(currentDreamId, stepsList)
+
+        // Отправляем результат на главный экран
+        updateMainActivityStar(allCompleted)
+
+        if (allCompleted) {
+            Toast.makeText(this, "🎉 Все шаги выполнены! Мечта сбывается!", Toast.LENGTH_LONG).show()
+        }
+
+        return allCompleted
+    }
+
+    private fun updateMainActivityStar(allStepsCompleted: Boolean) {
+        val resultIntent = Intent().apply {
+            putExtra("dream_id", currentDreamId)
+            putExtra("all_steps_completed", allStepsCompleted)
+        }
+        setResult(RESULT_OK, resultIntent)
+    }
+
+    private fun showAddStepDialog() {
+        val dialogBuilder = AlertDialog.Builder(this)
+        val dialogView = layoutInflater.inflate(R.layout.dialog_simple_input, null)
+        val editText = dialogView.findViewById<EditText>(R.id.et_input)
+
+        editText.setText("")
+        editText.hint = "Что нужно сделать?"
+        editText.setTextColor(Color.BLACK)
+
+        val dialog = dialogBuilder.setView(dialogView)
+            .setTitle("Добавить шаг")
+            .setPositiveButton("Добавить") { _, _ ->
+                val stepText = editText.text.toString().trim()
+                if (stepText.isNotEmpty()) {
+                    val newStep = DreamStep(stepText, false)
+                    stepsList.add(newStep)
+                    DreamManager.updateDreamSteps(currentDreamId, stepsList)
+                    stepsAdapter.updateSteps(stepsList)
+                    checkAllStepsCompleted()
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .create()
+
+        dialog.show()
+    }
+
+    private fun saveStepsBeforeExit() {
+        DreamManager.updateDreamSteps(currentDreamId, stepsList)
+        checkAllStepsCompleted()
+    }
+
+    override fun onBackPressed() {
+        saveStepsBeforeExit()
+        super.onBackPressed()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        saveStepsBeforeExit()
+    }
+}
