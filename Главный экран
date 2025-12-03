@@ -1,0 +1,647 @@
+package com.example.sj
+
+import androidx.appcompat.app.AppCompatActivity
+import android.os.Bundle
+import android.widget.TextView
+import android.widget.EditText
+import android.widget.Toast
+import android.widget.ImageView
+import androidx.appcompat.app.AlertDialog
+import android.util.DisplayMetrics
+import android.view.MotionEvent
+import android.view.ViewGroup
+import android.graphics.Typeface
+import android.view.View
+import android.content.Intent
+import android.view.animation.AlphaAnimation
+import android.widget.LinearLayout
+import java.text.SimpleDateFormat
+import java.util.*
+import android.view.LayoutInflater
+import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.LinearLayoutManager
+import android.widget.ImageButton
+import androidx.constraintlayout.widget.ConstraintLayout
+import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
+
+class MainActivity2 : AppCompatActivity() {
+
+    companion object {
+        const val REQUEST_CODE_STEPS = 1
+    }
+
+    private var dreamsCreated = 0
+    private var isFirstLaunch = true
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main2)
+
+        // Инициализируем менеджеры
+        JournalManager.initialize(this)
+        DreamManager.initialize(this)
+
+        val button = findViewById<TextView>(R.id.Button1)
+        button.setOnClickListener {
+            showAddDreamDialog()
+        }
+
+        // Загружаем сохраненные мечты
+        loadSavedDreams()
+
+        setupAssistant()
+        setupJournal()
+    }
+
+    private fun loadSavedDreams() {
+        val dreams = DreamManager.getAllDreams()
+        dreams.values.forEach { dream ->
+            addDreamToUI(dream.title, dream.id, dream.positionX, dream.positionY, false)
+            // Автоматически обновляем внешний вид звезды
+            updateStarAppearance(dream.id, dream.allStepsCompleted)
+        }
+        dreamsCreated = dreams.size
+    }
+
+    private fun setupJournal() {
+        val journalIcon = findViewById<ImageView>(R.id.iv_journal)
+        journalIcon.setOnClickListener {
+            showJournalDialog()
+        }
+    }
+
+    private fun showJournalDialog() {
+        val dialogBuilder = AlertDialog.Builder(this)
+        val dialogView = layoutInflater.inflate(R.layout.dialog_journal_achievement, null)
+
+        val editTitle = dialogView.findViewById<EditText>(R.id.edit_title)
+        val editDescription = dialogView.findViewById<EditText>(R.id.edit_description)
+
+        val dialog = dialogBuilder.setView(dialogView)
+            .setTitle("📖 Дневник достижений")
+            .setPositiveButton("Сохранить") { _, _ ->
+                val title = editTitle.text.toString().trim()
+                val description = editDescription.text.toString().trim()
+
+                if (title.isNotEmpty() && description.isNotEmpty()) {
+                    val entry = JournalEntry(
+                        title = title,
+                        description = description,
+                    )
+
+                    JournalManager.addEntry(entry)
+                    Toast.makeText(this, "Достижение сохранено! 🌟", Toast.LENGTH_SHORT).show()
+                    showSpeechBubble("Ура! Новое достижение! Ты молодец! 🎉")
+                } else {
+                    Toast.makeText(this, "Заполните все поля", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .setNeutralButton("Мои записи") { _, _ ->
+                showJournalHistory()
+            }
+            .create()
+
+        dialog.show()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == REQUEST_CODE_STEPS && resultCode == RESULT_OK) {
+            val dreamId = data?.getLongExtra("dream_id", 0L) ?: 0L
+            val allStepsCompleted = data?.getBooleanExtra("all_steps_completed", false) ?: false
+
+            if (dreamId != 0L) {
+                updateStarAppearance(dreamId, allStepsCompleted)
+            }
+        }
+    }
+
+    // ==================== ДНЕВНИК ДОСТИЖЕНИЙ ====================
+
+    private fun showJournalHistory() {
+        val entries = JournalManager.getEntries()
+
+        if (entries.isEmpty()) {
+            Toast.makeText(this, "У вас пока нет записей в дневнике", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_journal_beautiful, null)
+        val recyclerView = dialogView.findViewById<RecyclerView>(R.id.rvJournalEntries)
+        val tvEntriesCount = dialogView.findViewById<TextView>(R.id.tvEntriesCount)
+
+        tvEntriesCount.text = "${entries.size} ${getRecordsWord(entries.size)}"
+
+        recyclerView.layoutManager = LinearLayoutManager(this)
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setPositiveButton("Закрыть") { d, _ -> d.dismiss() }
+            .create()
+
+        val adapter = BeautifulJournalAdapter(entries) { entry ->
+            dialog.dismiss()
+        }
+        recyclerView.adapter = adapter
+
+        dialog.show()
+    }
+
+    private inner class BeautifulJournalAdapter(
+        private val entries: List<JournalEntry>,
+        private val onItemClick: (JournalEntry) -> Unit
+    ) : RecyclerView.Adapter<BeautifulJournalAdapter.JournalViewHolder>() {
+
+        inner class JournalViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+            val tvTitle: TextView = itemView.findViewById(R.id.tvTitle)
+            val tvDate: TextView = itemView.findViewById(R.id.tvDate)
+            val tvType: TextView = itemView.findViewById(R.id.tvType)
+            val tvDescription: TextView = itemView.findViewById(R.id.tvDescription)
+            val btnDelete: ImageButton = itemView.findViewById(R.id.btnDelete)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): JournalViewHolder {
+            val view = LayoutInflater.from(parent.context)
+                .inflate(R.layout.item_journal_beautiful, parent, false)
+            return JournalViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: JournalViewHolder, position: Int) {
+            val entry = entries[position]
+            val date = SimpleDateFormat("dd.MM.yy HH:mm", Locale.getDefault()).format(Date(entry.date))
+
+            holder.tvTitle.text = entry.title
+            holder.tvDate.text = date
+            holder.tvDescription.text = entry.description
+            holder.tvType.text = entry.achievementType
+
+            setupTypeColor(holder.tvType, entry.achievementType)
+
+            holder.itemView.setOnClickListener {
+                onItemClick(entry)
+            }
+
+            holder.btnDelete.setOnClickListener {
+                showDeleteConfirmation(entry)
+            }
+        }
+
+        override fun getItemCount() = entries.size
+
+        private fun setupTypeColor(textView: TextView, type: String) {
+            val color = when (type) {
+                "Достижение" -> "#4CAF50"
+                "Прогресс" -> "#2196F3"
+                "Мысль" -> "#9C27B0"
+                "Успех" -> "#FF9800"
+                "Идея" -> "#E91E63"
+                else -> "#6D83F2"
+            }
+            textView.setBackgroundColor(Color.parseColor(color))
+        }
+    }
+
+    // ==================== ПОМОЩНИК КОТИК ====================
+
+    private fun setupAssistant() {
+        val assistant = findViewById<ImageView>(R.id.iv_assistant)
+        assistant.setBackgroundColor(0x00000000)
+        assistant.background = null
+
+        assistant.setOnClickListener {
+            showRandomTip()
+        }
+
+        if (isFirstLaunch) {
+            showDelayedMessage("Привет! Я твой космический котик! 🌟", 1500)
+            isFirstLaunch = false
+        }
+
+        startCatAnimation()
+    }
+
+    private fun showDelayedMessage(message: String, delay: Long) {
+        Handler(Looper.getMainLooper()).postDelayed({
+            showSpeechBubble(message)
+        }, delay)
+    }
+
+    private fun showSpeechBubble(message: String) {
+        val speechBubble = findViewById<LinearLayout>(R.id.speech_bubble)
+        val speechText = findViewById<TextView>(R.id.tv_speech)
+
+        speechText.text = message
+        speechBubble.visibility = View.VISIBLE
+
+        Handler(Looper.getMainLooper()).postDelayed({
+            speechBubble.visibility = View.INVISIBLE
+        }, 4000)
+    }
+
+    private var currentTipIndex = 0
+
+    private fun showRandomTip() {
+        val tips = listOf(
+            "Мяу! Нажми на + чтобы добавить мечту! 🐾",
+            "Перетаскивай звезды по экрану как хочешь!",
+            "Нажми на звезду чтобы добавить шаги к мечте!",
+            "Когда все шаги выполнены - звезда засияет! ✨",
+            "Каждая мечта - как новая игрушка для игры!",
+            "Не бойся мечтать о великом! Я с тобой!",
+            "У тебя отлично получается! Продолжай в том же духе! 🌟",
+            "Помни: даже маленькие шаги ведут к большим мечтам!",
+            "Мррр... Твое звездное небо становится красивее!",
+            "Я всегда здесь чтобы поддержать тебя! Мяу! 😻"
+        )
+
+        val tip = tips[currentTipIndex]
+        currentTipIndex = (currentTipIndex + 1) % tips.size
+        showSpeechBubble(tip)
+    }
+
+    private fun startCatAnimation() {
+        val assistant = findViewById<ImageView>(R.id.iv_assistant)
+        val handler = Handler(Looper.getMainLooper())
+        val runnable = object : Runnable {
+            override fun run() {
+                animateCat()
+                handler.postDelayed(this, 8000)
+            }
+        }
+        handler.postDelayed(runnable, 8000)
+    }
+
+    private fun animateCat() {
+        val assistant = findViewById<ImageView>(R.id.iv_assistant)
+        assistant.animate()
+            .scaleX(1.05f)
+            .scaleY(1.05f)
+            .setDuration(600)
+            .withEndAction {
+                assistant.animate()
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .setDuration(600)
+                    .start()
+            }
+            .start()
+    }
+
+    // ==================== МЕЧТЫ И ЗВЕЗДЫ ====================
+
+    private fun showAddDreamDialog() {
+        val dialogBuilder = AlertDialog.Builder(this)
+        val dialogView = layoutInflater.inflate(R.layout.dialog_add_dream, null)
+        val editText = dialogView.findViewById<EditText>(R.id.et_dream_title)
+
+        val dialog = dialogBuilder.setView(dialogView)
+            .setPositiveButton("Добавить") { _, _ ->
+                val dreamTitle = editText.text.toString().trim()
+
+                if (dreamTitle.isNotEmpty()) {
+                    addDreamToMap(dreamTitle)
+                    Toast.makeText(this, "Мечта '$dreamTitle' добавлена! 🌟", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this, "Введите название мечты", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Отмена") { dialog, _ ->
+                dialog.dismiss()
+            }
+            .create()
+
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.show()
+    }
+
+    private fun addDreamToMap(title: String) {
+        val dreamId = System.currentTimeMillis()
+        DreamManager.addDream(dreamId, title)
+        addDreamToUI(title, dreamId, 0f, 0f, true)
+
+        dreamsCreated++
+        when (dreamsCreated) {
+            1 -> showSpeechBubble("Ура! Первая мечта! 🎉 Теперь нажми на звезду чтобы добавить шаги!")
+            3 -> showSpeechBubble("Уже 3 мечты! Твое звездное небо растет! 🌠")
+            5 -> showSpeechBubble("5 мечт! Ты настоящий мечтатель! Продолжай в том же духе!")
+            10 -> showSpeechBubble("10 мечт! Твое небо сияет ярче всех звезд! 🌌")
+        }
+    }
+
+    private fun addDreamToUI(title: String, dreamId: Long, x: Float, y: Float, showToast: Boolean = true) {
+        val container = findViewById<ViewGroup>(R.id.container)
+
+        val dreamContainer = ConstraintLayout(this)
+        val containerParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        dreamContainer.layoutParams = containerParams
+
+        val starView = ImageView(this)
+        starView.id = View.generateViewId()
+        starView.setImageResource(R.drawable.ic_star)
+        starView.tag = dreamId
+
+        val starSize = 210
+        val starParams = ConstraintLayout.LayoutParams(starSize, starSize)
+        starParams.topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        starParams.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+        starParams.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+        starView.layoutParams = starParams
+        dreamContainer.addView(starView)
+
+        val labelView = TextView(this)
+        labelView.id = View.generateViewId()
+        labelView.text = title
+        labelView.setTextColor(0xFFFFFFFF.toInt())
+        labelView.textSize = 10f
+        labelView.setTypeface(null, Typeface.BOLD)
+        labelView.setPadding(32, 16, 32, 16)
+        labelView.gravity = android.view.Gravity.CENTER
+        labelView.minWidth = 120
+        labelView.maxLines = 2
+        labelView.ellipsize = android.text.TextUtils.TruncateAt.END
+
+        val labelParams = ConstraintLayout.LayoutParams(
+            ConstraintLayout.LayoutParams.WRAP_CONTENT,
+            ConstraintLayout.LayoutParams.WRAP_CONTENT
+        )
+        labelParams.topToBottom = starView.id
+        labelParams.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+        labelParams.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+        labelParams.topMargin = 12
+        labelParams.matchConstraintMinWidth = 120
+        labelParams.matchConstraintMaxWidth = 300
+        labelView.layoutParams = labelParams
+        dreamContainer.addView(labelView)
+
+        labelView.setBackgroundResource(R.drawable.label_background)
+
+        val screenWidth = getScreenWidth()
+        val screenHeight = getScreenHeight()
+
+        val finalX = if (x == 0f) (150 until screenWidth - 400).random().toFloat() else x
+        val finalY = if (y == 0f) (150 until screenHeight - 400).random().toFloat() else y
+
+        dreamContainer.x = finalX
+        dreamContainer.y = finalY
+
+        if (x == 0f && y == 0f) {
+            DreamManager.updateDreamPosition(dreamId, finalX, finalY)
+        }
+
+        starView.setOnClickListener {
+            val intent = Intent(this@MainActivity2, StepsActivity::class.java).apply {
+                putExtra("dream_title", title)
+                putExtra("dream_id", dreamId)
+            }
+            startActivityForResult(intent, REQUEST_CODE_STEPS)
+        }
+
+        container.addView(dreamContainer)
+        makeDreamDraggable(dreamContainer, starView, dreamId)
+
+        if (showToast) {
+            Toast.makeText(this, "Мечта '$title' добавлена! 🌟", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun updateStarAppearance(dreamId: Long, allStepsCompleted: Boolean) {
+        val container = findViewById<ViewGroup>(R.id.container)
+
+        for (i in 0 until container.childCount) {
+            val dreamContainer = container.getChildAt(i) as? ConstraintLayout
+            dreamContainer?.let {
+                val starView = it.getChildAt(0) as? ImageView
+                if (starView?.tag == dreamId) {
+
+                    // ПРОВЕРЯЕМ СТАТУС ИЗ СОХРАНЕННЫХ ДАННЫХ
+                    val dream = DreamManager.getDreamById(dreamId)
+                    val isCompleted = dream?.allStepsCompleted ?: allStepsCompleted
+
+                    if (isCompleted) {
+                        // Анимация для выполненной мечты
+                        starView.animate()
+                            .scaleX(1.3f)
+                            .scaleY(1.3f)
+                            .setDuration(500)
+                            .withEndAction {
+                                starView.animate()
+                                    .scaleX(1.0f)
+                                    .scaleY(1.0f)
+                                    .setDuration(500)
+                                    .start()
+                            }
+                            .start()
+
+                        val alphaAnim = AlphaAnimation(0.7f, 1.0f)
+                        alphaAnim.duration = 800
+                        alphaAnim.repeatMode = AlphaAnimation.REVERSE
+                        alphaAnim.repeatCount = AlphaAnimation.INFINITE
+                        starView.startAnimation(alphaAnim)
+
+                    } else {
+                        // Обычное состояние
+                        starView.clearAnimation()
+                        starView.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setDuration(300)
+                            .start()
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    private fun makeDreamDraggable(dreamContainer: ConstraintLayout, starView: ImageView, dreamId: Long) {
+        var dX = 0f
+        var dY = 0f
+        var isDragging = false
+
+        dreamContainer.setOnTouchListener { view, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    dX = view.x - event.rawX
+                    dY = view.y - event.rawY
+                    isDragging = false
+                    view.parent?.let { parent ->
+                        if (parent is ViewGroup) {
+                            parent.bringChildToFront(view)
+                        }
+                    }
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!isDragging) {
+                        val deltaX = Math.abs(event.rawX + dX - view.x)
+                        val deltaY = Math.abs(event.rawY + dY - view.y)
+                        if (deltaX > 10 || deltaY > 10) {
+                            isDragging = true
+                        }
+                    }
+
+                    if (isDragging) {
+                        view.x = event.rawX + dX
+                        view.y = event.rawY + dY
+
+                        DreamManager.updateDreamPosition(dreamId, view.x, view.y)
+
+                        val container = findViewById<ViewGroup>(R.id.container)
+                        val minX = 0f
+                        val minY = 0f
+                        val maxX = container.width - view.width.toFloat()
+                        val maxY = container.height - view.height.toFloat()
+
+                        if (view.x < minX) view.x = minX
+                        if (view.y < minY) view.y = minY
+                        if (view.x > maxX) view.x = maxX
+                        if (view.y > maxY) view.y = maxY
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!isDragging) {
+                        starView.performClick()
+                    }
+                }
+            }
+            true
+        }
+    }
+
+
+    // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
+
+    private fun getScreenWidth(): Int {
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val windowMetrics = windowManager.currentWindowMetrics
+            windowMetrics.bounds.width()
+        } else {
+            val displayMetrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getMetrics(displayMetrics)
+            displayMetrics.widthPixels
+        }
+    }
+
+    private fun getScreenHeight(): Int {
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val windowMetrics = windowManager.currentWindowMetrics
+            windowMetrics.bounds.height()
+        } else {
+            val displayMetrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getMetrics(displayMetrics)
+            displayMetrics.heightPixels
+        }
+    }
+
+    private fun getRecordsWord(count: Int): String {
+        return when {
+            count % 10 == 1 && count % 100 != 11 -> "запись"
+            count % 10 in 2..4 && count % 100 !in 12..14 -> "записи"
+            else -> "записей"
+        }
+    }
+
+    private fun showDeleteConfirmation(entry: JournalEntry) {
+        AlertDialog.Builder(this)
+            .setTitle("Удалить запись?")
+            .setMessage("Вы уверены, что хотите удалить запись:\n\"${entry.title}\"?")
+            .setPositiveButton("Удалить") { dialog, which ->
+                JournalManager.deleteEntry(entry.id)
+                Toast.makeText(this, "Запись удалена", Toast.LENGTH_SHORT).show()
+                showSpeechBubble("Запись удалена из дневника")
+                showJournalHistory()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+}
+//Дизайн экрана
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/container"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/_435848792256674680"
+    tools:context=".MainActivity2"
+    android:clipChildren="false">
+
+    
+    <ImageView
+        android:id="@+id/iv_assistant"
+        android:layout_width="232dp"
+        android:layout_height="306dp"
+        android:layout_marginEnd="-40dp"
+        android:layout_marginBottom="-50dp"
+        android:background="@android:color/transparent"
+        android:contentDescription="Милый котик-помощник"
+        android:src="@drawable/ic_cat_cute"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Пузырь речи над котиком -->
+    <LinearLayout
+        android:id="@+id/speech_bubble"
+        android:layout_width="200dp"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/speech_bubble"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:visibility="invisible"
+        app:layout_constraintBottom_toTopOf="@+id/iv_assistant"
+        app:layout_constraintEnd_toEndOf="@id/iv_assistant"
+        android:layout_marginEnd="40dp">
+
+        <TextView
+            android:id="@+id/tv_speech"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Привет!"
+            android:textColor="@android:color/black"
+            android:textSize="14sp" />
+
+    </LinearLayout>
+    <!-- Иконка дневника чувств -->
+    <ImageView
+        android:id="@+id/iv_journal"
+        android:layout_width="52dp"
+        android:layout_height="54dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="16dp"
+
+        android:contentDescription="Дневник чувств"
+        android:src="@drawable/ic_journal"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+    <!-- Кнопка добавления -->
+    <TextView
+        android:id="@+id/Button1"
+        android:layout_width="55dp"
+        android:layout_height="53dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/round_buttom"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:text="+"
+        android:textColor="#FFFFF59D"
+        android:textSize="30sp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="0.765"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="1.0" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
